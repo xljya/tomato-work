@@ -1,35 +1,223 @@
-name: 🔄 Upstream Sync
+# ====================================================================
+# 🔄 Simple Upstream Sync Workflow
+# ====================================================================
+# 功能说明：
+# - 自动同步上游仓库的更改到当前 fork
+# - 基础冲突检测和 Issue 通知
+# - 简化的 keepalive 机制
+# - 适合个人项目和简单需求
+# ====================================================================
 
+name: 🔄 Simple Upstream Sync
+
+# ====================================================================
+# 触发条件配置
+# ====================================================================
 on:
+  # 定时触发：每天 UTC 凌晨 1 点自动运行
   schedule:
-    - cron: '0 1 * * *'   # 每天 UTC 凌晨 1 点自动运行
-  workflow_dispatch:       # 手动运行按钮支持
+    - cron: '0 1 * * *'
+  
+  # 手动触发：支持在 Actions 页面手动运行
+  workflow_dispatch:
 
+# ====================================================================
+# 环境变量配置
+# ====================================================================
+env:
+  # 上游仓库地址（格式：owner/repo）
+  # 🔧 请根据你的实际情况修改这个值
+  UPSTREAM_REPO: 'xjh22222228/tomato-work'
+  
+  # 目标分支名称
+  # 🔧 如果你的主分支不是 main，请修改为对应的分支名
+  TARGET_BRANCH: 'main'
+
+# ====================================================================
+# 主要任务定义
+# ====================================================================
 jobs:
   sync:
+    # 使用最新的 Ubuntu 环境
     runs-on: ubuntu-latest
+    
+    # 权限配置：定义此 workflow 需要的最小权限
+    permissions:
+      contents: write  # 读写仓库内容（提交、推送）
+      issues: write   # 创建和管理 Issues（冲突通知）
+    
+    # ================================================================
+    # 执行步骤
+    # ================================================================
     steps:
+      # ============================================================
+      # 步骤 1：检出仓库代码
+      # ============================================================
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
+          # 禁用凭据持久化，提高安全性
           persist-credentials: false
+          # 获取完整历史记录，确保能正确比较提交
           fetch-depth: 0
+          # 使用自定义 PAT token，确保有足够权限
+          token: ${{ secrets.GH_PAT }}
 
+      # ============================================================
+      # 步骤 2：配置 Git 身份
+      # ============================================================
       - name: 🔧 Set Git identity
         run: |
+          # 使用官方 GitHub Actions bot 身份
+          # 这样可以避免使用个人身份信息
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: 📡 Add upstream remote
+      # ============================================================
+      # 步骤 3：获取上游仓库更改
+      # ============================================================
+      - name: 📡 Fetch upstream changes
         run: |
-          git remote add upstream https://github.com/xjh22222228/tomato-work.git
+          echo "📡 Adding upstream and fetching changes..."
+          # 添加上游仓库作为远程源
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+          # 获取上游仓库的所有更改
           git fetch upstream
 
-      - name: 🔁 Merge upstream/main into fork/main
+      # ============================================================
+      # 步骤 4：检查变更并尝试合并
+      # ============================================================
+      - name: 📊 Check for changes and merge
+        id: sync
         run: |
-          git checkout main
-          git merge upstream/main || echo "No changes"
+          # 切换到目标分支
+          git checkout ${{ env.TARGET_BRANCH }}
+          
+          # 计算上游新增的提交数量
+          upstream_commits=$(git rev-list --count HEAD..upstream/${{ env.TARGET_BRANCH }})
+          echo "🔍 Found $upstream_commits new upstream commits"
+          
+          # 如果有上游更改，尝试合并
+          if [ "$upstream_commits" -gt 0 ]; then
+            echo "🔄 Merging upstream changes..."
+            
+            # 尝试自动合并，如果失败则记录冲突状态
+            if git merge upstream/${{ env.TARGET_BRANCH }}; then
+              echo "✅ Merge successful"
+              echo "status=success" >> $GITHUB_OUTPUT
+              echo "changes=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Merge failed - conflicts detected"
+              echo "status=conflict" >> $GITHUB_OUTPUT
+              echo "changes=false" >> $GITHUB_OUTPUT
+              # 取消失败的合并，保持仓库状态干净
+              git merge --abort
+            fi
+          else
+            echo "📭 No upstream changes"
+            echo "status=no_changes" >> $GITHUB_OUTPUT
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: 🚀 Push changes to fork
+      # ============================================================
+      # 步骤 5：处理合并冲突
+      # ============================================================
+      - name: 🚨 Create conflict issue
+        # 只有在检测到冲突时才执行
+        if: steps.sync.outputs.status == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PAT }}
+          script: |
+            // 定义 Issue 标题和内容
+            const title = '🚨 Upstream Sync Failed: Merge Conflicts';
+            const body = `
+            ## 🚨 自动同步失败
+            
+            **时间**: ${new Date().toISOString()}
+            **原因**: 检测到合并冲突
+            
+            ### 🛠️ 手动解决步骤：
+            \`\`\`bash
+            # 1. 克隆仓库到本地
+            git clone ${{ github.server_url }}/${{ github.repository }}.git
+            cd ${{ github.event.repository.name }}
+            
+            # 2. 添加上游仓库
+            git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git
+            git fetch upstream
+            
+            # 3. 尝试合并（会显示冲突文件）
+            git merge upstream/${{ env.TARGET_BRANCH }}
+            
+            # 4. 手动编辑冲突文件，解决冲突后：
+            git add .
+            git commit -m "resolve merge conflicts"
+            git push origin ${{ env.TARGET_BRANCH }}
+            \`\`\`
+            
+            ---
+            *由 GitHub Actions 自动创建*
+            `;
+            
+            // 创建 Issue 通知用户
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['sync-conflict', 'help-wanted']
+            });
+
+      # ============================================================
+      # 步骤 6：周末 Keepalive 机制
+      # ============================================================
+      - name: 🫀 Weekly keepalive
+        # 只有在无上游变更时才考虑 keepalive
+        if: steps.sync.outputs.status == 'no_changes'
         run: |
-          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git HEAD:main
+          # 获取当前是星期几（1=周一, 7=周日，使用 UTC 时间）
+          # 只在周日创建 keepalive，避免过于频繁
+          if [ "$(date -u +%u)" -eq 7 ]; then
+            echo "🫀 Creating weekly keepalive commit..."
+            # 使用空提交保持仓库活跃，防止 GitHub Actions 被禁用
+            # 空提交不会改变代码，只是为了维持活跃状态
+            git commit --allow-empty -m "chore: weekly keepalive $(date -u +%Y-%m-%d)"
+            echo "keepalive=true" >> $GITHUB_OUTPUT
+          else
+            echo "⏭️ Skipping keepalive (not Sunday)"
+            echo "keepalive=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ============================================================
+      # 步骤 7：推送更改到仓库
+      # ============================================================
+      - name: 🚀 Push changes
+        # 条件：有成功的合并 或 创建了 keepalive 提交
+        if: steps.sync.outputs.changes == 'true' || env.keepalive == 'true'
+        run: |
+          echo "🚀 Pushing changes..."
+          # 使用 PAT token 推送更改
+          # 格式：https://x-access-token:TOKEN@github.com/OWNER/REPO.git
+          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git HEAD:${{ env.TARGET_BRANCH }}
+          echo "✅ Push completed"
+
+      # ============================================================
+      # 步骤 8：生成运行摘要
+      # ============================================================
+      - name: 📋 Summary
+        # 总是执行，无论前面步骤成功或失败
+        if: always()
+        run: |
+          # 生成格式化的状态报告
+          # 包含关键信息：时间、仓库、状态、keepalive 等
+          echo "
+          ╔════════════════════════════════════════╗
+          ║           🔄 SYNC SUMMARY               ║
+          ╠════════════════════════════════════════╣
+          ║ 📅 Time: $(date -u '+%Y-%m-%d %H:%M:%S')
+          ║ 🎯 Repo: ${{ env.UPSTREAM_REPO }}
+          ║ 📊 Status: ${{ steps.sync.outputs.status || 'unknown' }}
+          ║ 🫀 Keepalive: ${keepalive:-false}
+          ╚════════════════════════════════════════╝
+          "
