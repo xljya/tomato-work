@@ -27,7 +27,6 @@ const noMobile = !isMobile()
 
 const { Search } = Input
 const { RangePicker } = DatePicker
-const { Option, OptGroup } = Select
 
 const enum FilterType {
   Today = 1,
