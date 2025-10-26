@@ -64,7 +64,7 @@ const CreateReminder: React.FC<Props> = function ({
 
   return (
     <Modal
-      title="新增"
+      title={rowData ? '编辑' : '新增'}
       open={visible}
       onOk={handleSubmitForm}
       onCancel={onCancel}

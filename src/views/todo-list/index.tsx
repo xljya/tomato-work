@@ -121,13 +121,13 @@ const TodoListPage = () => {
         break
       // 删除
       case 1:
-        serviceDeleteTodoList(row.id).then((res) => {
+        serviceDeleteTodoList(row.id).then(() => {
           tableRef.current.getTableData()
         })
         break
       // 状态
       case 2:
-        serviceUpdateTodoList(row.id, { status: 2 }).then((res) => {
+        serviceUpdateTodoList(row.id, { status: 2 }).then(() => {
           tableRef.current.getTableData()
         })
         break

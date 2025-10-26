@@ -7,17 +7,31 @@ import dayjs from 'dayjs'
 import CreateReminder from './CreateReminder'
 import useKeepState from 'use-keep-state'
 import { connect } from 'react-redux'
-import { DatePicker, Button, Select, Tag, Modal, Form, Popconfirm } from 'antd'
-import { serviceGetReminder, serviceDeleteReminder } from '@/services'
+import {
+  DatePicker,
+  Button,
+  Select,
+  Tag,
+  Modal,
+  Form,
+  Popconfirm,
+  Switch,
+  type SelectProps,
+} from 'antd'
+import {
+  serviceGetReminder,
+  serviceDeleteReminder,
+  serviceUpdateReminder,
+} from '@/services'
 import { FORMAT_DATE, formatDateTime, isMobile } from '@/utils'
 
 const noMobile = !isMobile()
 
 const { RangePicker } = DatePicker
-const STATUS_TYPE: Record<string, any> = {
+const STATUS_TYPE = {
   1: { color: '#f50', text: '待提醒' },
   2: { color: '#87d068', text: '已提醒' },
-}
+} satisfies Record<string, any>
 
 interface State {
   showCreateModal: boolean
@@ -40,7 +54,7 @@ const ReminderPage: React.FC<Props> = function ({ userInfo }) {
       title: '状态',
       dataIndex: 'type',
       width: 100,
-      render: (row: any) => (
+      render: (row: keyof typeof STATUS_TYPE) => (
         <Tag color={STATUS_TYPE[row].color}>{STATUS_TYPE[row].text}</Tag>
       ),
     },
@@ -56,11 +70,17 @@ const ReminderPage: React.FC<Props> = function ({ userInfo }) {
     },
     {
       title: '操作',
-      width: 180,
+      width: 240,
       align: 'right',
       fixed: noMobile && 'right',
       render: (record: any) => (
         <>
+          <Switch
+            checkedChildren="开启"
+            unCheckedChildren="关闭"
+            checked={record.open}
+            onChange={() => handleSwitch(record)}
+          />
           <Button onClick={() => handleEdit(record)}>编辑</Button>
           <Popconfirm
             title="您确定要删除吗？"
@@ -107,6 +127,14 @@ const ReminderPage: React.FC<Props> = function ({ userInfo }) {
     })
   }
 
+  function handleSwitch(record: any) {
+    serviceUpdateReminder(record.id, {
+      open: !record.open,
+    }).then(() => {
+      tableRef.current.getTableData()
+    })
+  }
+
   function handleEdit(record: any) {
     setState({
       showCreateModal: true,
@@ -148,7 +176,7 @@ const ReminderPage: React.FC<Props> = function ({ userInfo }) {
     }
   }, [userInfo.email])
 
-  const options = [
+  const options: SelectProps['options'] = [
     { label: '全部', value: 0 },
     { label: '待提醒', value: 1 },
     { label: '已提醒', value: 2 },
